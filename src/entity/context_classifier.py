@@ -4,33 +4,48 @@ from src.entity.types import EntityRecord
 
 
 PERSON_CONTEXT_PATTERNS = [
-    r"\bείπε\s+(?:ο|η)\s+{name}\b",
-    r"\bρώτησε\s+(?:ο|η)\s+{name}\b",
-    r"\bαπάντησε\s+(?:ο|η)\s+{name}\b",
-    r"\bφώναξε\s+(?:ο|η)\s+{name}\b",
-    r"\bψιθύρισε\s+(?:ο|η)\s+{name}\b",
-    r"\bκοίταξε\s+(?:ο|η)\s+{name}\b",
-    r"\b(?:ο|η)\s+{name}\s+είπε\b",
-    r"\b(?:ο|η)\s+{name}\s+ρώτησε\b",
-    r"\b(?:ο|η)\s+{name}\s+απάντησε\b",
-    r"\b(?:ο|η)\s+{name}\s+κοίταξε\b",
+    (r"\bείπε\s+(?:ο|η)\s+{name}\b", 3, "speech verb + article"),
+    (r"\bρώτησε\s+(?:ο|η)\s+{name}\b", 3, "speech verb + article"),
+    (r"\bαπάντησε\s+(?:ο|η)\s+{name}\b", 3, "speech verb + article"),
+    (r"\bφώναξε\s+(?:ο|η)\s+{name}\b", 3, "speech verb + article"),
+    (r"\bψιθύρισε\s+(?:ο|η)\s+{name}\b", 3, "speech verb + article"),
+
+    (r"\b(?:ο|η)\s+{name}\s+είπε\b", 3, "article + name + speech verb"),
+    (r"\b(?:ο|η)\s+{name}\s+ρώτησε\b", 3, "article + name + speech verb"),
+    (r"\b(?:ο|η)\s+{name}\s+απάντησε\b", 3, "article + name + speech verb"),
+
+    (r"\b(?:ο|η)\s+{name}\s+κοίταξε\b", 2, "article + name + action verb"),
+    (r"\b(?:ο|η)\s+{name}\s+σηκώθηκε\b", 2, "article + name + action verb"),
+    (r"\b(?:ο|η)\s+{name}\s+γύρισε\b", 2, "article + name + action verb"),
+    (r"\b(?:ο|η)\s+{name}\s+προχώρησε\b", 2, "article + name + action verb"),
+    (r"\b(?:ο|η)\s+{name}\s+χαμογέλασε\b", 2, "article + name + action verb"),
+
+    (r"\bτον\s+{name}\b", 1, "personal article"),
+    (r"\bτην\s+{name}\b", 1, "personal article"),
+    (r"\bτου\s+{name}\b", 1, "personal article"),
+    (r"\bτης\s+{name}\b", 1, "personal article"),
+    (r"\bμε\s+τον\s+{name}\b", 2, "preposition + personal article"),
+    (r"\bμε\s+την\s+{name}\b", 2, "preposition + personal article"),
+    (r"\bδίπλα\s+στον\s+{name}\b", 2, "spatial relation + personal article"),
+    (r"\bδίπλα\s+στην\s+{name}\b", 2, "spatial relation + personal article"),
 ]
 
 
-def looks_like_person(
+def get_person_context_score(
     entity: EntityRecord,
-) -> bool:
+) -> tuple[int, list[str]]:
     """
-    Check whether the stored contexts provide evidence
-    that an entity is a person.
+    Calculate contextual evidence that an entity is a person.
     """
 
     name = re.escape(entity["entity"])
-
     contexts = entity.get("contexts", [])
 
+    score = 0
+    reasons: list[str] = []
+
     for context in contexts:
-        for pattern in PERSON_CONTEXT_PATTERNS:
+        for pattern, points, reason in PERSON_CONTEXT_PATTERNS:
             regex = pattern.format(name=name)
 
             if re.search(
@@ -38,25 +53,45 @@ def looks_like_person(
                 context,
                 flags=re.IGNORECASE,
             ):
-                return True
+                score += points
 
-    return False
+                if reason not in reasons:
+                    reasons.append(reason)
+
+    return score, reasons
 
 
 def reclassify_entity(
     entity: EntityRecord,
 ) -> EntityRecord:
     """
-    Reclassify entities using contextual evidence.
+    Reclassify an entity using contextual evidence.
     """
 
-    if looks_like_person(entity):
-        entity["type"] = "PERSON"
+    score, reasons = get_person_context_score(entity)
 
-        if entity.get("source") == "NER":
-            entity["confidence"] = "HIGH"
-        else:
-            entity["confidence"] = "MEDIUM"
+    if score >= 3:
+        entity["type"] = "PERSON"
+        entity["confidence"] = "HIGH"
+        entity["classification_reason"] = (
+            f"context person score={score}: "
+            + ", ".join(reasons)
+        )
+
+    elif score >= 2:
+        entity["type"] = "PERSON"
+        entity["confidence"] = "MEDIUM"
+        entity["classification_reason"] = (
+            f"context person score={score}: "
+            + ", ".join(reasons)
+        )
+
+    else:
+        entity["classification_reason"] = (
+            f"context person score={score}"
+        )
+
+    entity["context_score"] = score
 
     return entity
 

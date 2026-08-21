@@ -29,6 +29,8 @@ def export_entities_to_csv(
                 "source",
                 "occurrences",
                 "confidence",
+                "context_score",
+                "classification_reason",
                 "keep",
             ],
         )
@@ -43,6 +45,11 @@ def export_entities_to_csv(
                     "source": entity.get("source", ""),
                     "occurrences": entity.get("occurrences", 0),
                     "confidence": entity.get("confidence", ""),
+                    "context_score": entity.get("context_score", 0),
+                    "classification_reason": entity.get(
+                        "classification_reason",
+                        "",
+                    ),
                     "keep": entity.get("keep", ""),
                 }
             )

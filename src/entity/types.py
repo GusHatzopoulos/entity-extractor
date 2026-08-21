@@ -10,3 +10,5 @@ class EntityRecord(TypedDict):
     confidence: NotRequired[str]
     keep: NotRequired[bool]
     contexts: NotRequired[list[str]]
+    context_score: NotRequired[int]
+    classification_reason: NotRequired[str]
