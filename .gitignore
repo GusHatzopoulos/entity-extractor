@@ -3,6 +3,12 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Private input files
+data/input/
+
+# Generated results
+output/
+
 # C extensions
 *.so
 
