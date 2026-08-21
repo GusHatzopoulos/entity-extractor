@@ -222,3 +222,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Private input files
+data/input/
+
+# Generated output
+output/
+
+# Local environment
+.venv/
