@@ -1,0 +1,225 @@
+from src.entity.context_analyzer import get_entity_contexts
+
+from src.entity.types import EntityRecord
+
+COMMON_NON_ENTITIES = {
+    "Αυτό",
+    "Αυτή",
+    "Αυτές",
+    "Αυτοί",
+    "Αλλά",
+    "Από",
+    "Αμέσως",
+    "Αργότερα",
+    "Για",
+    "Γιατί",
+    "Δεν",
+    "Έτσι",
+    "Εδώ",
+    "Είναι",
+    "Είμαστε",
+    "Είχε",
+    "Είπε",
+    "Ένα",
+    "Ένας",
+    "Έπειτα",
+    "Εκείνος",
+    "Εκείνη",
+    "Η",
+    "Ήταν",
+    "Θα",
+    "Και",
+    "Κάποια",
+    "Κάποιος",
+    "Κάποτε",
+    "Καθώς",
+    "Κι",
+    "Μα",
+    "Με",
+    "Μετά",
+    "Μη",
+    "Μια",
+    "Μόλις",
+    "Ναι",
+    "Να",
+    "Ο",
+    "Οι",
+    "Όλοι",
+    "Όμως",
+    "Όταν",
+    "Όχι",
+    "Ποιος",
+    "Πώς",
+    "Πρέπει",
+    "Σαν",
+    "Σε",
+    "Στη",
+    "Στην",
+    "Στο",
+    "Στον",
+    "Στους",
+    "Τα",
+    "Την",
+    "Της",
+    "Τι",
+    "Το",
+    "Τον",
+    "Του",
+    "Τους",
+    "Τώρα",
+    "Τότε",
+    "Ώστε",
+    "Εσύ",
+    "Εσείς",
+    "Είσαι",
+    "Είστε",
+    "Πού",
+    "Ποιοι",
+    "Πολύ",
+    "Πολλοί",
+    "Εκεί",
+    "Εκείνοι",
+    "Φυσικά",
+    "Αυτούς",
+    "Έλα",
+    "Έλαβα",
+    "Όλα",
+    "Όλες",
+    "Ακόμα",
+    "Ακόμη",
+    "Μάλιστα",
+    "Ακριβώς",
+    "Πριν",
+    "Πολλές",
+    "Λίγο",
+    "Λίγοι",
+    "Ωστόσο",
+    "Ίσως",
+    "Χμ",
+    "Ωραία",
+    "Χμφ",
+    "Αν",
+    "Αντί",
+    "Όπως",
+    "Λοιπόν",
+    "Αντίθετα",
+    "Στην",
+    "Στο",
+    "Στον",
+    "Στους",
+    "Στις",
+    "Στα",
+    "Θέλω",
+    "Θέλεις",
+    "Όσοι",
+    "Όσες",
+    "Όσα",
+    "Όσο",
+    "Παρά",
+    "Πολλές",
+    "Έχω",
+    "Έχεις",
+    "Γύρισε",
+    "Γύρισα",
+    "Μονάχα",
+    "Μόνο",
+    "Αλήθεια",
+    "Έκανε",
+    "Έκανα",
+    "Έκαναν",
+    "Έτσι",
+    "Έχουμε",
+    "Σίγουρα",
+    "Επίσης",
+    "Ευχαριστώ",
+    "Ευχαριστούμε",
+    "Συγγνώμη",
+    "Συγγνώμης",
+    "Σερ",
+    "Σας",
+    "Ωραία",
+    "Μην",
+    "Μη",
+    "Κανείς",
+    "Κανένας",
+    "Σχεδόν",
+    "Δύο",
+    "Τρεις",
+    "Δυστυχώς",
+    "Κοίταξε",
+    "Κοίταξα",
+    "Ξαφνικά",
+}
+
+def evaluate_entity(
+    entity: EntityRecord,
+    text: str,
+) -> EntityRecord:
+    """
+    Add filtering, confidence, and context metadata to an entity.
+    """
+
+    name = entity["entity"]
+    entity_type = entity["type"]
+    source = entity["source"]
+    occurrences = entity["occurrences"]
+
+    keep = True
+    confidence = "REVIEW"
+
+    if name in COMMON_NON_ENTITIES:
+        keep = False
+        confidence = "REJECT"
+
+    elif source == "NER" and entity_type == "PERSON":
+        confidence = "HIGH"
+
+    elif source == "NER" and occurrences >= 5:
+        confidence = "MEDIUM"
+
+    elif source == "HEURISTIC" and occurrences >= 5:
+        confidence = "REVIEW"
+
+    elif source == "HEURISTIC" and occurrences < 2:
+        confidence = "LOW"
+
+    contexts = get_entity_contexts(
+        text,
+        name,
+        max_contexts=3,
+    )
+
+    return {
+        **entity,
+        "confidence": confidence,
+        "keep": keep,
+        "contexts": contexts,
+    }
+
+
+def filter_entities(
+    entities: list[EntityRecord],
+    text: str,
+) -> list[EntityRecord]:
+    """
+    Evaluate entities and remove rejected false positives.
+    """
+
+    evaluated: list[EntityRecord] = [
+        evaluate_entity(entity, text)
+        for entity in entities
+    ]
+
+    kept: list[EntityRecord] = [
+        entity
+        for entity in evaluated
+        if entity.get("keep", True)
+    ]
+
+    return sorted(
+        kept,
+        key=lambda item: (
+            -item["occurrences"],
+            item["entity"],
+        ),
+    )

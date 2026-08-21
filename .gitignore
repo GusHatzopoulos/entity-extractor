@@ -6,6 +6,12 @@ __pycache__/
 # Private input files
 data/input/
 
+# Generated output
+output/
+
+# Local virtual environment
+.venv/
+
 # Generated results
 output/
 
@@ -225,9 +231,3 @@ __marimo__/
 
 # Private input files
 data/input/
-
-# Generated output
-output/
-
-# Local environment
-.venv/
