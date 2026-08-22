@@ -16,6 +16,19 @@ def export_entities_to_csv(
         exist_ok=True,
     )
 
+    fieldnames = [
+        "entity",
+        "original_type",
+        "type",
+        "source",
+        "occurrences",
+        "confidence",
+        "person_score",
+        "location_score",
+        "classification_reason",
+        "keep",
+    ]
+
     with path.open(
         "w",
         encoding="utf-8-sig",
@@ -23,16 +36,7 @@ def export_entities_to_csv(
     ) as csv_file:
         writer = csv.DictWriter(
             csv_file,
-            fieldnames=[
-                "entity",
-                "type",
-                "source",
-                "occurrences",
-                "confidence",
-                "context_score",
-                "classification_reason",
-                "keep",
-            ],
+            fieldnames=fieldnames,
         )
 
         writer.writeheader()
@@ -41,11 +45,28 @@ def export_entities_to_csv(
             writer.writerow(
                 {
                     "entity": entity.get("entity", ""),
+                    "original_type": entity.get(
+                        "original_type",
+                        "",
+                    ),
                     "type": entity.get("type", ""),
                     "source": entity.get("source", ""),
-                    "occurrences": entity.get("occurrences", 0),
-                    "confidence": entity.get("confidence", ""),
-                    "context_score": entity.get("context_score", 0),
+                    "occurrences": entity.get(
+                        "occurrences",
+                        0,
+                    ),
+                    "confidence": entity.get(
+                        "confidence",
+                        "",
+                    ),
+                    "person_score": entity.get(
+                        "person_score",
+                        0,
+                    ),
+                    "location_score": entity.get(
+                        "location_score",
+                        0,
+                    ),
                     "classification_reason": entity.get(
                         "classification_reason",
                         "",

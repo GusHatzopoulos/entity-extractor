@@ -7,8 +7,12 @@ class EntityRecord(TypedDict):
     source: str
     occurrences: int
 
+    original_type: NotRequired[str]
     confidence: NotRequired[str]
     keep: NotRequired[bool]
     contexts: NotRequired[list[str]]
-    context_score: NotRequired[int]
+
+    person_score: NotRequired[int]
+    location_score: NotRequired[int]
+
     classification_reason: NotRequired[str]
