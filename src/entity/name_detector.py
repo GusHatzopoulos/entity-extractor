@@ -1,4 +1,6 @@
 import re
+import unicodedata
+from collections import defaultdict
 from dataclasses import dataclass
 
 from src.entity.lexicon import (
@@ -9,6 +11,10 @@ from src.entity.lexicon import (
 )
 
 
+# =========================================================
+# Prefixes / descriptive aliases
+# =========================================================
+
 PREFIX_WORDS = (
     COMMON_NON_ENTITIES
     | TITLE_WORDS
@@ -16,9 +22,16 @@ PREFIX_WORDS = (
 )
 
 
-# ---------------------------------------------------------
-# Greek name patterns
-# ---------------------------------------------------------
+EPITHET_ALIASES = {
+    "Μέγα Βάλλεν": "Βάλλεν",
+    "Ξεχασμένος Ήρωας Βάλλεν": "Βάλλεν",
+    "Ξεχασμένου Ήρωα Βάλλεν": "Βάλλεν",
+}
+
+
+# =========================================================
+# Greek-token patterns
+# =========================================================
 
 GREEK_LETTERS = (
     r"Α-ΩΆΈΉΊΌΎΏΪΫ"
@@ -28,34 +41,19 @@ GREEK_LETTERS = (
 GREEK_NAME_WORD = (
     rf"[Α-ΩΆΈΉΊΌΎΏΪΫ]"
     rf"[α-ωάέήίόύώϊϋΐΰ]+"
-    rf"(?:[-–—]"
-    rf"[{GREEK_LETTERS}]+)*"
+    rf"(?:[-–—][{GREEK_LETTERS}]+)*"
 )
 
-SINGLE_NAME_PATTERN = re.compile(
-    rf"(?<!\w)({GREEK_NAME_WORD})(?!\w)"
-)
-
-MULTI_NAME_PATTERN = re.compile(
+CAPITALIZED_WORD_PATTERN = re.compile(
     rf"(?<!\w)"
-    rf"({GREEK_NAME_WORD}"
-    rf"(?:\s+{GREEK_NAME_WORD}){{1,2}})"
-    rf"(?!\w)"
-)
-
-TITLE_NAME_PATTERN = re.compile(
-    rf"(?<!\w)"
-    rf"(?:Σερ|Λαίδη|Λόρδος|Άρχοντας)"
-    rf"\s+"
-    rf"({GREEK_NAME_WORD}"
-    rf"(?:\s+{GREEK_NAME_WORD})?)"
+    rf"({GREEK_NAME_WORD})"
     rf"(?!\w)"
 )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # Candidate model
-# ---------------------------------------------------------
+# =========================================================
 
 @dataclass
 class NameCandidate:
@@ -74,17 +72,25 @@ class NameCandidate:
         )
 
 
-# ---------------------------------------------------------
+@dataclass
+class CandidateStats:
+    occurrences: int = 0
+    context_hits: int = 0
+    title_hits: int = 0
+    multiword_hits: int = 0
+
+
+# =========================================================
 # Normalization
-# ---------------------------------------------------------
+# =========================================================
 
-def normalize_name(name: str) -> str:
-    """
-    Normalize a recovery name candidate.
-
-    Removes invisible formatting characters and
-    collapses repeated whitespace.
-    """
+def normalize_name(
+    name: str,
+) -> str:
+    name = unicodedata.normalize(
+        "NFC",
+        name,
+    )
 
     name = (
         name
@@ -98,19 +104,34 @@ def normalize_name(name: str) -> str:
     )
 
 
-# ---------------------------------------------------------
-# Candidate validation
-# ---------------------------------------------------------
+def clean_input_text(
+    text: str,
+) -> str:
+    text = unicodedata.normalize(
+        "NFC",
+        text,
+    )
 
-def is_allowed_candidate(name: str) -> bool:
+    return (
+        text
+        .replace("\u200b", "")
+        .replace("\ufeff", "")
+        .replace("\u00ad", "")
+    )
+
+
+# =========================================================
+# Candidate validation
+# =========================================================
+
+def is_allowed_candidate(
+    name: str,
+) -> bool:
+    if not name:
+        return False
+
     if name in KNOWN_ENTITY_TYPES:
         return True
-    """
-    Decide whether a detected capitalized expression is
-    allowed into the recovery candidate pool.
-
-    Known entities always take priority over exclusions.
-    """
 
     if name in COMMON_NON_ENTITIES:
         return False
@@ -120,26 +141,19 @@ def is_allowed_candidate(name: str) -> bool:
     if not parts:
         return False
 
-    # Single-word candidate.
     if len(parts) == 1:
         return (
             name not in TITLE_WORDS
             and name not in ROLE_WORDS
         )
 
-    # Reject expressions contaminated by an article,
-    # title, role, or other common prefix.
-    #
-    # Examples:
+    # Reject:
     # Στην Έιλιν
-    # Στο Ίστφορτ
     # Διοικητή Όνοξ
-    # Σχόλαρχε Κουέντιν
-    # Βασιλιά Ρέιμοντ Ράνον
+    # Βασιλιά Ρέιμοντ Ρανόν
     if parts[0] in PREFIX_WORDS:
         return False
 
-    # Reject phrases made entirely from common words.
     if all(
         part in COMMON_NON_ENTITIES
         for part in parts
@@ -149,136 +163,19 @@ def is_allowed_candidate(name: str) -> bool:
     return True
 
 
-# ---------------------------------------------------------
-# Occurrence counting
-# ---------------------------------------------------------
-
-def _count_exact_occurrences(
-    text: str,
-    name: str,
-) -> int:
-    """
-    Count exact occurrences of a candidate in the text.
-    """
-
-    pattern = re.compile(
-        rf"(?<!\w)"
-        rf"{re.escape(name)}"
-        rf"(?!\w)"
-    )
-
-    return len(
-        pattern.findall(text)
-    )
-
-
-# ---------------------------------------------------------
-# Context scoring
-# ---------------------------------------------------------
-
-def _count_context_hits(
-    text: str,
-    name: str,
-) -> int:
-    """
-    Count contexts that provide evidence that a candidate
-    may represent a person.
-
-    Matching is case-sensitive intentionally.
-    """
-
-    escaped = re.escape(name)
-
-    patterns = [
-        # Article + candidate
-        rf"\b(?:ο|η)\s+{escaped}\b",
-        rf"\b(?:τον|την)\s+{escaped}\b",
-        rf"\b(?:του|της)\s+{escaped}\b",
-
-        # Preposition + personal article
-        rf"\bμε\s+(?:τον|την)\s+{escaped}\b",
-
-        # Candidate followed by speech/action verb
-        (
-            rf"\b(?:ο|η)\s+{escaped}\s+"
-            rf"(?:είπε|ρώτησε|απάντησε|φώναξε|"
-            rf"ψιθύρισε|μίλησε|κοίταξε|"
-            rf"σηκώθηκε|γύρισε|προχώρησε|"
-            rf"χαμογέλασε)\b"
-        ),
-
-        # Speech verb followed by candidate
-        (
-            rf"\b(?:είπε|ρώτησε|απάντησε|"
-            rf"φώναξε|ψιθύρισε)\s+"
-            rf"(?:ο|η)\s+{escaped}\b"
-        ),
-    ]
-
-    hits = 0
-
-    for pattern in patterns:
-        hits += len(
-            re.findall(
-                pattern,
-                text,
-            )
-        )
-
-    return hits
-
-
-def _count_title_hits(
-    text: str,
-    name: str,
-) -> int:
-    """
-    Count explicit title + name occurrences.
-
-    Examples:
-    Σερ Ξάνθος
-    Λαίδη Κύνθια
-    """
-
-    escaped = re.escape(name)
-
-    pattern = (
-        rf"\b"
-        rf"(?:Σερ|Λαίδη|Λόρδος|Άρχοντας)"
-        rf"\s+{escaped}\b"
-    )
-
-    return len(
-        re.findall(
-            pattern,
-            text,
-        )
-    )
-
-
-# ---------------------------------------------------------
+# =========================================================
 # Fragment detection
-# ---------------------------------------------------------
+# =========================================================
 
 def _is_probable_fragment(
     name: str,
     all_names: set[str],
 ) -> bool:
-    """
-    Detect short single-token fragments of longer candidates.
-
-    Examples:
-    Έραρ  -> Έραρντ
-    Αλβί  -> Αλβίνα
-    Μόρτι -> Μόρτιζεν
-    """
-
     parts = name.split()
 
     if len(parts) != 1:
         return False
 
-    # Avoid aggressively removing legitimate longer names.
     if len(name) > 5:
         return False
 
@@ -286,9 +183,7 @@ def _is_probable_fragment(
         if other == name:
             continue
 
-        other_parts = other.split()
-
-        if len(other_parts) != 1:
+        if " " in other:
             continue
 
         if (
@@ -304,16 +199,6 @@ def _is_truncated_multiword(
     name: str,
     all_names: set[str],
 ) -> bool:
-    """
-    Detect multi-word candidates whose final component
-    is a truncated version of another candidate.
-
-    Examples:
-    Έραρντ Φεράν -> Έραρντ Φεράνθεον
-    Έθρικ Μπόλ   -> Έθρικ Μπόλβαρντ
-    Τόρβιλ Θά    -> Τόρβιλ Θάεντ
-    """
-
     parts = name.split()
 
     if len(parts) < 2:
@@ -321,7 +206,6 @@ def _is_truncated_multiword(
 
     last_part = parts[-1]
 
-    # Long final components are less likely to be truncations.
     if len(last_part) > 6:
         return False
 
@@ -351,148 +235,330 @@ def _is_truncated_multiword(
 
 
 def _remove_fragments(
-    candidate_names: set[str],
+    names: set[str],
 ) -> set[str]:
-    """
-    Remove probable single-word and multi-word fragments
-    after the complete candidate pool has been collected.
-    """
-
     return {
         name
-        for name in candidate_names
+        for name in names
         if (
             not _is_probable_fragment(
                 name,
-                candidate_names,
+                names,
             )
             and not _is_truncated_multiword(
                 name,
-                candidate_names,
+                names,
             )
         )
     }
 
 
-# ---------------------------------------------------------
+# =========================================================
+# Local evidence
+# =========================================================
+
+PERSON_ARTICLE_PATTERN = re.compile(
+    r"(?:"
+    r"\bο\s+$|"
+    r"\bη\s+$|"
+    r"\bτον\s+$|"
+    r"\bτην\s+$|"
+    r"\bτου\s+$|"
+    r"\bτης\s+$|"
+    r"\bμε\s+τον\s+$|"
+    r"\bμε\s+την\s+$"
+    r")"
+)
+
+
+TITLE_PREFIX_PATTERN = re.compile(
+    r"(?:"
+    r"\bΣερ\s+$|"
+    r"\bΛαίδη\s+$|"
+    r"\bΛόρδος\s+$|"
+    r"\bΆρχοντας\s+$"
+    r")"
+)
+
+
+ACTION_AFTER_PATTERN = re.compile(
+    r"^\s+(?:"
+    r"είπε|"
+    r"ρώτησε|"
+    r"απάντησε|"
+    r"φώναξε|"
+    r"ψιθύρισε|"
+    r"μίλησε|"
+    r"κοίταξε|"
+    r"σηκώθηκε|"
+    r"γύρισε|"
+    r"προχώρησε|"
+    r"χαμογέλασε"
+    r")\b"
+)
+
+
+def _local_evidence(
+    text: str,
+    start: int,
+    end: int,
+) -> tuple[int, int]:
+    """
+    Calculate person-context and title evidence from a
+    small local window instead of rescanning the full book.
+    """
+
+    before = text[
+        max(0, start - 50):start
+    ]
+
+    after = text[
+        end:min(len(text), end + 40)
+    ]
+
+    context_hits = 0
+    title_hits = 0
+
+    if PERSON_ARTICLE_PATTERN.search(before):
+        context_hits += 1
+
+    if ACTION_AFTER_PATTERN.search(after):
+        context_hits += 1
+
+    if TITLE_PREFIX_PATTERN.search(before):
+        title_hits += 1
+
+    return (
+        context_hits,
+        title_hits,
+    )
+
+
+# =========================================================
+# Single-pass candidate indexing
+# =========================================================
+
+def _index_candidates(
+    text: str,
+    excluded_names: set[str],
+) -> dict[str, CandidateStats]:
+    """
+    Scan the text once.
+
+    From each sequence of capitalized Greek words, create:
+    - single-word candidates
+    - two-word candidates
+    - three-word candidates
+
+    Statistics are collected immediately so the book does
+    not need to be rescanned for every candidate.
+    """
+
+    stats: dict[
+        str,
+        CandidateStats,
+    ] = defaultdict(CandidateStats)
+
+    tokens = list(
+        CAPITALIZED_WORD_PATTERN.finditer(text)
+    )
+
+    token_count = len(tokens)
+
+    for index, token_match in enumerate(tokens):
+        # -------------------------------------------------
+        # Single-word candidate
+        # -------------------------------------------------
+
+        raw_name = normalize_name(
+            token_match.group(1)
+        )
+
+        if (
+            raw_name not in excluded_names
+            and is_allowed_candidate(raw_name)
+        ):
+            candidate_stats = stats[raw_name]
+
+            candidate_stats.occurrences += 1
+
+            context_hits, title_hits = (
+                _local_evidence(
+                    text,
+                    token_match.start(),
+                    token_match.end(),
+                )
+            )
+
+            candidate_stats.context_hits += (
+                context_hits
+            )
+
+            candidate_stats.title_hits += (
+                title_hits
+            )
+
+        # -------------------------------------------------
+        # Two- and three-word candidates
+        # -------------------------------------------------
+
+        for size in (2, 3):
+            final_index = index + size - 1
+
+            if final_index >= token_count:
+                break
+
+            selected = tokens[
+                index:index + size
+            ]
+
+            # Every word must be separated only by
+            # whitespace. If punctuation exists between
+            # them they are not one candidate.
+            valid_sequence = True
+
+            for left, right in zip(
+                selected,
+                selected[1:],
+            ):
+                separator = text[
+                    left.end():right.start()
+                ]
+
+                if (
+                    not separator
+                    or not separator.isspace()
+                ):
+                    valid_sequence = False
+                    break
+
+            if not valid_sequence:
+                break
+
+            raw_multi_name = " ".join(
+                match.group(1)
+                for match in selected
+            )
+
+            raw_multi_name = normalize_name(
+                raw_multi_name
+            )
+
+            # Epithets are descriptive variants of an
+            # already existing entity. Do not create a
+            # separate recovery candidate.
+            if raw_multi_name in EPITHET_ALIASES:
+                continue
+
+            if raw_multi_name in excluded_names:
+                continue
+
+            if not is_allowed_candidate(
+                raw_multi_name
+            ):
+                continue
+
+            candidate_stats = stats[
+                raw_multi_name
+            ]
+
+            candidate_stats.occurrences += 1
+            candidate_stats.multiword_hits += 1
+
+            start = selected[0].start()
+            end = selected[-1].end()
+
+            context_hits, title_hits = (
+                _local_evidence(
+                    text,
+                    start,
+                    end,
+                )
+            )
+
+            candidate_stats.context_hits += (
+                context_hits
+            )
+
+            candidate_stats.title_hits += (
+                title_hits
+            )
+
+    return stats
+
+
+# =========================================================
 # Main recovery detector
-# ---------------------------------------------------------
+# =========================================================
 
 def detect_name_candidates(
     text: str,
     min_occurrences: int = 1,
+    excluded_names: set[str] | None = None,
 ) -> list[NameCandidate]:
     """
-    High-recall recovery detector for character names missed
-    by the main NER/POS pipeline.
+    Fast high-recall recovery detector.
 
-    The detector intentionally generates possible candidates
-    rather than automatically promoting them to PERSON.
+    Unlike the previous implementation, this version does
+    not perform multiple full-text regex scans for every
+    candidate.
+
+    existing/known entity names can be excluded before
+    expensive recovery processing.
     """
 
-    # Remove invisible formatting characters from the text
-    # before regex matching.
-    clean_text = (
-        text
-        .replace("\u200b", "")
-        .replace("\ufeff", "")
-        .replace("\u00ad", "")
+    clean_text = clean_input_text(text)
+
+    excluded = set(
+        excluded_names or set()
     )
 
-    candidate_names: set[str] = set()
+    # Known entities do not need recovery.
+    excluded.update(
+        KNOWN_ENTITY_TYPES.keys()
+    )
 
-    # -----------------------------------------------------
-    # 1. Single capitalized words
-    # -----------------------------------------------------
+    indexed_stats = _index_candidates(
+        clean_text,
+        excluded,
+    )
 
-    for match in SINGLE_NAME_PATTERN.finditer(
-        clean_text
-    ):
-        name = normalize_name(
-            match.group(1)
-        )
-
-        if is_allowed_candidate(name):
-            candidate_names.add(name)
-
-    # -----------------------------------------------------
-    # 2. Two- and three-word capitalized sequences
-    # -----------------------------------------------------
-
-    for match in MULTI_NAME_PATTERN.finditer(
-        clean_text
-    ):
-        name = normalize_name(
-            match.group(1)
-        )
-
-        if is_allowed_candidate(name):
-            candidate_names.add(name)
-
-    # -----------------------------------------------------
-    # 3. Explicit title + name combinations
-    # -----------------------------------------------------
-
-    for match in TITLE_NAME_PATTERN.finditer(
-        clean_text
-    ):
-        name = normalize_name(
-            match.group(1)
-        )
-
-        if is_allowed_candidate(name):
-            candidate_names.add(name)
-
-    # -----------------------------------------------------
-    # 4. Remove truncated / fragmented candidates
-    # -----------------------------------------------------
+    candidate_names = set(
+        indexed_stats.keys()
+    )
 
     candidate_names = _remove_fragments(
         candidate_names
     )
 
-    # -----------------------------------------------------
-    # 5. Build scored candidates
-    # -----------------------------------------------------
-
     candidates: list[NameCandidate] = []
 
     for name in candidate_names:
-        occurrences = _count_exact_occurrences(
-            clean_text,
-            name,
-        )
+        candidate_stats = indexed_stats[
+            name
+        ]
 
-        if occurrences < min_occurrences:
+        if (
+            candidate_stats.occurrences
+            < min_occurrences
+        ):
             continue
-
-        context_hits = _count_context_hits(
-            clean_text,
-            name,
-        )
-
-        title_hits = _count_title_hits(
-            clean_text,
-            name,
-        )
-
-        word_count = len(
-            name.split()
-        )
-
-        multiword_hits = (
-            occurrences
-            if word_count >= 2
-            else 0
-        )
 
         candidates.append(
             NameCandidate(
                 name=name,
-                occurrences=occurrences,
-                context_hits=context_hits,
-                title_hits=title_hits,
-                multiword_hits=multiword_hits,
+                occurrences=(
+                    candidate_stats.occurrences
+                ),
+                context_hits=(
+                    candidate_stats.context_hits
+                ),
+                title_hits=(
+                    candidate_stats.title_hits
+                ),
+                multiword_hits=(
+                    candidate_stats.multiword_hits
+                ),
             )
         )
 

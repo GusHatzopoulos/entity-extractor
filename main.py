@@ -1,7 +1,6 @@
 import argparse
 
 from pathlib import Path
-
 from src.entity.detector import detect_combined_entities
 from src.entity.context_classifier import reclassify_entities
 from src.entity.entity_filter import filter_entities
@@ -21,7 +20,7 @@ EXTRACTORS = {
     ".docx": extract_text_from_docx,
     ".txt": extract_text_from_txt,
 }
-
+    
 def main() -> None:
 
     parser = argparse.ArgumentParser(
@@ -148,7 +147,7 @@ def main() -> None:
     print()
     print("Preview:")
     print("-" * 70)
-    print(text[:2000])
+    print("Preview omitted during processing.")
 
     print()
     print("Combined entities:")
@@ -180,9 +179,15 @@ def main() -> None:
     print()
     print("Detecting recovery name candidates...")
 
+    existing_entity_names = {
+        entity["entity"]
+        for entity in classified_entities
+    }
+
     name_candidates = detect_name_candidates(
         text,
         min_occurrences=1,
+        excluded_names=existing_entity_names,
     )
 
     recovered_candidates = build_recovery_candidates(
