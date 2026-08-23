@@ -1,3 +1,5 @@
+import re
+import unicodedata
 from collections import defaultdict
 
 from src.entity.aliases import CANONICAL_ENTITY_ALIASES
@@ -7,37 +9,81 @@ from src.entity.types import (
 )
 
 
-# =========================================================
-# Canonical name
-# =========================================================
+def _comparison_key(
+    name: str,
+) -> str:
+    """
+    Build a comparison-only key.
+
+    It is intentionally used for grouping/lookup only; it never
+    changes the spelling shown to the user.
+
+    This merges manuscript variants such as:
+        ΑΛΒΙΝΑ / Αλβίνα
+        ΚΟΥΕΝΤΙΝ / Κουέντιν
+        ΛΑΝΣ / Λανς
+
+    Accents and casing are ignored only for comparison.
+    """
+
+    normalized = unicodedata.normalize(
+        "NFD",
+        name,
+    )
+
+    without_marks = "".join(
+        char
+        for char in normalized
+        if unicodedata.category(char) != "Mn"
+    )
+
+    without_marks = unicodedata.normalize(
+        "NFC",
+        without_marks,
+    )
+
+    without_marks = re.sub(
+        r"\s+",
+        " ",
+        without_marks,
+    ).strip()
+
+    return without_marks.casefold()
+
+
+_ALIAS_BY_KEY = {
+    _comparison_key(alias): canonical
+    for alias, canonical
+    in CANONICAL_ENTITY_ALIASES.items()
+}
+
 
 def canonicalize_entity_name(
     name: str,
 ) -> str:
     """
-    Return the canonical form of an entity name.
+    Return the explicit canonical alias when available.
 
-    If no alias mapping exists, return the original name.
+    Lookup is exact first and accent/case-insensitive second.
     """
 
-    return CANONICAL_ENTITY_ALIASES.get(
-        name,
+    exact = CANONICAL_ENTITY_ALIASES.get(
+        name
+    )
+
+    if exact is not None:
+        return exact
+
+    return _ALIAS_BY_KEY.get(
+        _comparison_key(name),
         name,
     )
 
-
-# =========================================================
-# Span helpers
-# =========================================================
 
 def _spans_overlap(
     left: EntitySpan,
     right: EntitySpan,
 ) -> bool:
-    """
-    Return True when two textual spans overlap.
-    """
-
     return (
         left["start"] < right["end"]
         and right["start"] < left["end"]
@@ -47,10 +93,6 @@ def _spans_overlap(
 def _span_length(
     span: EntitySpan,
 ) -> int:
-    """
-    Return the number of characters covered by a span.
-    """
-
     return (
         span["end"]
         - span["start"]
@@ -60,10 +102,6 @@ def _span_length(
 def _deduplicate_exact_spans(
     spans: list[EntitySpan],
 ) -> list[EntitySpan]:
-    """
-    Remove exact duplicate spans.
-    """
-
     seen: set[
         tuple[int, int]
     ] = set()
@@ -80,7 +118,6 @@ def _deduplicate_exact_spans(
             continue
 
         seen.add(key)
-
         result.append(span)
 
     return result
@@ -90,34 +127,17 @@ def _merge_overlapping_spans(
     spans: list[EntitySpan],
 ) -> list[EntitySpan]:
     """
-    Convert overlapping detections of the same canonical
-    entity into one textual occurrence.
-
-    The longest span in each overlapping group is retained.
-
-    Example:
-
-        Τόρβιλ
-        Θάεντ
-        Τόρβιλ Θάεντ
-
-    when they refer to the same textual phrase, they count
-    as ONE canonical occurrence.
-
-    A standalone Τόρβιλ elsewhere remains a separate
-    occurrence.
+    Keep one occurrence for overlapping detections of the
+    same canonical entity, preferring the longest span.
     """
 
     if not spans:
         return []
 
-    unique_spans = (
-        _deduplicate_exact_spans(
-            spans
-        )
+    unique_spans = _deduplicate_exact_spans(
+        spans
     )
 
-    # Prefer longer detections first.
     ordered = sorted(
         unique_spans,
         key=lambda span: (
@@ -130,21 +150,16 @@ def _merge_overlapping_spans(
     accepted: list[EntitySpan] = []
 
     for candidate in ordered:
-
-        overlaps_existing = any(
+        if any(
             _spans_overlap(
                 candidate,
                 existing,
             )
             for existing in accepted
-        )
-
-        if overlaps_existing:
+        ):
             continue
 
-        accepted.append(
-            candidate
-        )
+        accepted.append(candidate)
 
     return sorted(
         accepted,
@@ -155,49 +170,89 @@ def _merge_overlapping_spans(
     )
 
 
-# =========================================================
-# Canonical entity merging
-# =========================================================
+def _display_rank(
+    entity: EntityRecord,
+    canonical_name: str,
+) -> tuple[int, int, int, int]:
+    """
+    Prefer stable human-readable spellings for a merged group.
+
+    Priority:
+    1. exact canonical target
+    2. non-ALL-CAPS spelling
+    3. stronger source
+    4. more occurrences
+    """
+
+    name = entity["entity"]
+
+    source_rank = {
+        "KNOWN": 3,
+        "NER": 2,
+        "HEURISTIC": 1,
+        "": 0,
+    }
+
+    return (
+        int(name == canonical_name),
+        int(not name.isupper()),
+        source_rank.get(
+            entity.get("source", ""),
+            0,
+        ),
+        entity.get("occurrences", 0),
+    )
+
 
 def canonicalize_entities(
     entities: list[EntityRecord],
 ) -> list[EntityRecord]:
     """
-    Merge aliases referring to the same canonical entity.
-
-    When span information is available, occurrence counts
-    are calculated from unique non-overlapping textual
-    occurrences instead of blindly summing alias counts.
-
-    Example:
-
-        Τόρβιλ
-        Θάεντ
-        Τόρβιλ Θάεντ
-
-    can all canonicalize to:
-
-        Τόρβιλ Θάεντ
-
-    without triple-counting the same phrase.
+    Merge aliases and case/accent variants while preserving
+    span-aware occurrence counting.
     """
 
     grouped: dict[
         str,
-        list[EntityRecord],
+        list[
+            tuple[
+                str,
+                EntityRecord,
+            ]
+        ],
     ] = defaultdict(list)
 
-    for entity in entities:
+    canonical_display_by_key: dict[
+        str,
+        str,
+    ] = {}
 
-        canonical_name = (
-            canonicalize_entity_name(
-                entity["entity"]
+    for entity in entities:
+        canonical_name = canonicalize_entity_name(
+            entity["entity"]
+        )
+
+        group_key = _comparison_key(
+            canonical_name
+        )
+
+        grouped[group_key].append(
+            (
+                canonical_name,
+                entity,
             )
         )
 
-        grouped[
+        # Explicit alias target wins as the display spelling.
+        if (
             canonical_name
-        ].append(entity)
+            != entity["entity"]
+            or group_key
+            not in canonical_display_by_key
+        ):
+            canonical_display_by_key[
+                group_key
+            ] = canonical_name
 
     canonical_entities: list[
         EntityRecord
@@ -219,14 +274,63 @@ def canonicalize_entities(
         "": 0,
     }
 
-    for (
-        canonical_name,
-        group,
-    ) in grouped.items():
+    for group_key, grouped_items in grouped.items():
+        canonical_names = [
+            item[0]
+            for item in grouped_items
+        ]
 
-        # -------------------------------------------------
-        # Select strongest metadata record
-        # -------------------------------------------------
+        group = [
+            item[1]
+            for item in grouped_items
+        ]
+
+        canonical_name = (
+            canonical_display_by_key.get(
+                group_key
+            )
+            or max(
+                group,
+                key=lambda entity: (
+                    int(
+                        not entity["entity"].isupper()
+                    ),
+                    source_rank.get(
+                        entity.get(
+                            "source",
+                            "",
+                        ),
+                        0,
+                    ),
+                    entity.get(
+                        "occurrences",
+                        0,
+                    ),
+                ),
+            )["entity"]
+        )
+
+        # If the chosen display is still ALL CAPS but a normal-cased
+        # variant exists, prefer the normal-cased manuscript form.
+        best_display_entity = max(
+            group,
+            key=lambda entity: _display_rank(
+                entity,
+                canonical_name,
+            ),
+        )
+
+        if (
+            canonical_name.isupper()
+            and not best_display_entity[
+                "entity"
+            ].isupper()
+        ):
+            canonical_name = (
+                best_display_entity[
+                    "entity"
+                ]
+            )
 
         best_entity = max(
             group,
@@ -252,10 +356,6 @@ def canonicalize_entities(
             ),
         )
 
-        # -------------------------------------------------
-        # Collect all available spans
-        # -------------------------------------------------
-
         all_spans: list[
             EntitySpan
         ] = []
@@ -263,7 +363,6 @@ def canonicalize_entities(
         records_without_spans = 0
 
         for entity in group:
-
             entity_spans = entity.get(
                 "spans",
                 [],
@@ -274,8 +373,6 @@ def canonicalize_entities(
                     entity_spans
                 )
             else:
-                # Compatibility fallback for records
-                # produced by older/non-span-aware code.
                 records_without_spans += (
                     entity.get(
                         "occurrences",
@@ -283,12 +380,7 @@ def canonicalize_entities(
                     )
                 )
 
-        # -------------------------------------------------
-        # Span-aware occurrence counting
-        # -------------------------------------------------
-
         if all_spans:
-
             canonical_spans = (
                 _merge_overlapping_spans(
                     all_spans
@@ -299,9 +391,7 @@ def canonicalize_entities(
                 len(canonical_spans)
                 + records_without_spans
             )
-
         else:
-            # Backwards-compatible fallback.
             canonical_spans = []
 
             total_occurrences = sum(
@@ -312,22 +402,16 @@ def canonicalize_entities(
                 for entity in group
             )
 
-        # -------------------------------------------------
-        # Build canonical record
-        # -------------------------------------------------
-
         merged: EntityRecord = {
             **best_entity,
             "entity": canonical_name,
-            "occurrences": (
-                total_occurrences
-            ),
+            "occurrences": total_occurrences,
         }
 
         if canonical_spans:
-            merged[
-                "spans"
-            ] = canonical_spans
+            merged["spans"] = (
+                canonical_spans
+            )
 
         canonical_entities.append(
             merged

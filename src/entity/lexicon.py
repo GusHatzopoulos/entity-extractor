@@ -105,6 +105,7 @@ KNOWN_ENTITY_TYPES = {
     "Αλθερία": "LOCATION",
     "Γκρίζοι Λόφοι": "LOCATION",
     "Γκρίζους Λόφους": "LOCATION",
+    "Γκρίζων Λόφων": "LOCATION",
     "Θίμπλ": "LOCATION",
     "Άσβαλντ": "LOCATION",
 
@@ -122,9 +123,11 @@ KNOWN_ENTITY_TYPES = {
     "Απόκρυφου Μουσείου": "LOCATION",
     "Θεογόνιας Γης": "LOCATION",
     "Χρυσής Εποχής": "LOCATION",
+    "Χρυσή Εποχή": "LOCATION",
     "Επτά Πολέμαρχων": "LOCATION",
     "Καψαλισμένη Γη": "LOCATION",
     "Κοίλο Δάσος": "LOCATION",
+    "Κοίλου Δάσους": "LOCATION",
     "Μαύρων Αρπυιών": "LOCATION",
     "Παλαιών Θεών": "LOCATION",
 
@@ -137,6 +140,10 @@ KNOWN_ENTITY_TYPES = {
 
     "Κάπρων": "ORG",
     "Κάπροι": "ORG",
+    "Κάπρου": "ORG",
+    "Κάπρο": "ORG",
+    "Κάπρος": "ORG",
+    "Κάπρους": "ORG",
 
     "Μονόκερος": "ORG",
     "Μονόκερο": "ORG",
@@ -857,6 +864,9 @@ COMMON_NON_ENTITIES = {
     "Χωριό",
     "Χωριού",
 
+    # Final confirmed full-book publication noise / fragments
+    "ντύσου",
+
     # Document / publishing noise
     "Όνομα",
     "Εκδοτικού",
@@ -883,4 +893,16 @@ COMMON_NON_ENTITIES = {
     "Θεογόνιας",
     "Χρυσής",
     "Παλιός",
+
+    # Final full-book publication noise / fragments
+    "Κα",
+    "Οικτίρμονος",
+    "Αρπυιών",
+    "Νεκρή",
+    "Νεκρής",
+    "Μαύρο",
+    "Φάρος",
+    "πυραυνό",
+    "Πα",
+    "Πλατεία",
 }
