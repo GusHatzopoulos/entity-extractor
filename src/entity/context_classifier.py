@@ -10,10 +10,24 @@ KNOWN_ENTITY_TYPES = {
     "Τζάρετ": "PERSON",
     "Θάεντ": "PERSON",
     "Ντέρμοντ": "PERSON",
+    "Μελίτα": "PERSON",
+    "Τόρ-βιλ Θάεντ": "PERSON",
 
     # Known locations
     "Βορρά": "LOCATION",
     "Βορράς": "LOCATION",
+    "Ανατολής": "LOCATION",
+    "Ανατολή": "LOCATION",
+    "Νότος": "LOCATION",
+    "Νότο": "LOCATION",
+    "Νότου": "LOCATION",
+    "Δύση": "LOCATION",
+    "Δύσης": "LOCATION",
+    "Κριστάνια": "LOCATION",
+    "Κριστανίας": "LOCATION",
+    "Παλιός Βορράς": "LOCATION",
+    "Αζάκου-μα": "LOCATION",
+    "Βόρεια": "LOCATION",
 
     # Known guilds / organizations
     "Αυτοκρατορικοί": "ORG",
@@ -25,6 +39,17 @@ KNOWN_ENTITY_TYPES = {
 
     "Μονόκερων": "ORG",
     "Μονόκεροι": "ORG",
+
+    "Ορχιδέας": "ORG",
+    "Ορχιδέα": "ORG",
+
+    "Αρκούδας": "ORG",
+
+    "Λύκους": "ORG",
+    "Λύκοι": "ORG",
+
+    "Οχιάς": "ORG",
+    "Οχιά": "ORG",
 }
 
 PERSON_CONTEXT_PATTERNS = [

@@ -1,4 +1,5 @@
 import argparse
+
 from pathlib import Path
 
 from src.entity.detector import detect_combined_entities
@@ -7,6 +8,9 @@ from src.entity.entity_filter import filter_entities
 from src.exporters.csv_exporter import export_entities_to_csv
 from src.extractors.docx_extractor import extract_text_from_docx
 from src.extractors.txt_extractor import extract_text_from_txt
+from src.exporters.excel_exporter import export_entities_to_xlsx
+from src.entity.final_selector import select_final_entities
+from src.exporters.appendix_exporter import export_appendix_to_xlsx
 
 
 EXTRACTORS = {
@@ -71,6 +75,10 @@ def main() -> None:
         filtered_entities
     )
 
+    final_entities = select_final_entities(
+    classified_entities
+)
+
     print()
     print(
         f"Entity detection completed: "
@@ -82,10 +90,25 @@ def main() -> None:
         f"{len(classified_entities):,}"
     )
 
+    print(
+    f"Final persons/locations: "
+    f"{len(final_entities):,}"
+)
 
-    output_file = (
+
+    csv_output_file = (
+    Path("output")
+    / f"{input_file.stem}_entities.csv"
+    )
+
+    xlsx_output_file = (
         Path("output")
-        / f"{input_file.stem}_entities.csv"
+        / f"{input_file.stem}_entities.xlsx"
+    )
+
+    appendix_output_path = (
+        Path("output")
+        / f"{input_file.stem}_appendix.xlsx"
     )
 
     print()
@@ -93,10 +116,26 @@ def main() -> None:
 
     export_entities_to_csv(
         classified_entities,
-        output_file,
+        csv_output_file,
     )
 
-    print(f"Results exported to: {output_file}")
+    export_entities_to_xlsx(
+        classified_entities,
+        xlsx_output_file,
+    )
+
+    export_appendix_to_xlsx(
+        classified_entities,
+        appendix_output_path,
+    )
+
+    print(
+        f"Appendix XLSX exported to: "
+        f"{appendix_output_path}"
+    )
+
+    print(f"CSV exported to: {csv_output_file}")
+    print(f"XLSX exported to: {xlsx_output_file}")
 
     print()
     print("Preview:")
