@@ -3,7 +3,7 @@ from collections import Counter, defaultdict
 
 import spacy
 
-from src.entity.lexicon import (COMMON_NON_ENTITIES, KNOWN_ENTITY_TYPES)
+from src.entity.lexicon import (COMMON_NON_ENTITIES, KNOWN_ENTITY_TYPES, ROLE_WORDS, TITLE_WORDS)
 from src.entity.normalizer import normalize_entity_name
 from src.entity.types import EntityRecord
 
@@ -47,6 +47,28 @@ def split_text_into_chunks(
 
     return chunks
 
+def _should_reject_entity_name(
+    name: str,
+) -> bool:
+    """
+    Reject known non-entities, standalone titles, and roles.
+
+    Explicit known entities always take priority.
+    """
+
+    if name in KNOWN_ENTITY_TYPES:
+        return False
+
+    if name in COMMON_NON_ENTITIES:
+        return True
+
+    if name in TITLE_WORDS:
+        return True
+
+    if name in ROLE_WORDS:
+        return True
+
+    return False
 
 def detect_spacy_entities_and_candidates(
     text: str,
@@ -105,6 +127,11 @@ def detect_spacy_entities_and_candidates(
             if not entity_text:
                 continue
 
+            if _should_reject_entity_name(
+                entity_text
+            ):
+                continue
+
             ner_entities.append(
                 (
                     entity_text,
@@ -124,10 +151,7 @@ def detect_spacy_entities_and_candidates(
             if not word:
                 continue
 
-            if (
-                word in COMMON_NON_ENTITIES
-                and word not in KNOWN_ENTITY_TYPES
-            ):
+            if _should_reject_entity_name(word):
                 continue
 
             if not WORD_PATTERN.fullmatch(word):

@@ -13,6 +13,7 @@ from src.entity.final_selector import select_final_entities
 from src.exporters.appendix_exporter import export_appendix_to_xlsx
 from src.entity.name_detector import detect_name_candidates
 from src.entity.recovery_merger import build_recovery_candidates
+from src.text_cleaner import clean_extracted_text
 
 
 EXTRACTORS = {
@@ -53,6 +54,7 @@ def main() -> None:
     print("Reading document...")
 
     text = extractor(input_file)
+    text = clean_extracted_text(text)
 
     print(
         f"Text extraction completed: "

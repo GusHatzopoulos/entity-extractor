@@ -102,9 +102,9 @@ def normalize_name(name: str) -> str:
 # Candidate validation
 # ---------------------------------------------------------
 
-def is_allowed_candidate(
-    name: str,
-) -> bool:
+def is_allowed_candidate(name: str) -> bool:
+    if name in KNOWN_ENTITY_TYPES:
+        return True
     """
     Decide whether a detected capitalized expression is
     allowed into the recovery candidate pool.
@@ -112,8 +112,8 @@ def is_allowed_candidate(
     Known entities always take priority over exclusions.
     """
 
-    if name in KNOWN_ENTITY_TYPES:
-        return True
+    if name in COMMON_NON_ENTITIES:
+        return False
 
     parts = name.split()
 
@@ -123,8 +123,7 @@ def is_allowed_candidate(
     # Single-word candidate.
     if len(parts) == 1:
         return (
-            name not in COMMON_NON_ENTITIES
-            and name not in TITLE_WORDS
+            name not in TITLE_WORDS
             and name not in ROLE_WORDS
         )
 
