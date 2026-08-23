@@ -1,28 +1,36 @@
 import re
 
 
-SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!;?])\s+")
+SENTENCE_SPLIT_PATTERN = re.compile(
+    r"(?<=[.!;?])\s+"
+)
 
 
 def get_entity_contexts(
     text: str,
     entity_name: str,
-    max_contexts: int = 3,
+    max_contexts: int = 12,
 ) -> list[str]:
     """
-    Return a small number of sentences containing the entity.
+    Return sentences containing an exact entity occurrence.
     """
 
-    sentences = SENTENCE_SPLIT_PATTERN.split(text)
+    entity_pattern = re.compile(
+        rf"(?<!\w){re.escape(entity_name)}(?!\w)"
+    )
 
-    contexts = []
+    contexts: list[str] = []
 
-    for sentence in sentences:
-        if entity_name in sentence:
-            cleaned = " ".join(sentence.split()).strip()
+    for sentence in SENTENCE_SPLIT_PATTERN.split(text):
+        if not entity_pattern.search(sentence):
+            continue
 
-            if cleaned:
-                contexts.append(cleaned)
+        cleaned = " ".join(
+            sentence.split()
+        ).strip()
+
+        if cleaned:
+            contexts.append(cleaned)
 
         if len(contexts) >= max_contexts:
             break

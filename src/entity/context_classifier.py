@@ -1,56 +1,8 @@
 import re
 
 from src.entity.types import EntityRecord
+from src.entity.lexicon import KNOWN_ENTITY_TYPES
 
-KNOWN_ENTITY_TYPES = {
-    # Known persons
-    "Βαντάνια": "PERSON",
-    "Κύνθια": "PERSON",
-    "Ξάνθος": "PERSON",
-    "Τζάρετ": "PERSON",
-    "Θάεντ": "PERSON",
-    "Ντέρμοντ": "PERSON",
-    "Μελίτα": "PERSON",
-    "Τόρ-βιλ Θάεντ": "PERSON",
-
-    # Known locations
-    "Βορρά": "LOCATION",
-    "Βορράς": "LOCATION",
-    "Ανατολής": "LOCATION",
-    "Ανατολή": "LOCATION",
-    "Νότος": "LOCATION",
-    "Νότο": "LOCATION",
-    "Νότου": "LOCATION",
-    "Δύση": "LOCATION",
-    "Δύσης": "LOCATION",
-    "Κριστάνια": "LOCATION",
-    "Κριστανίας": "LOCATION",
-    "Παλιός Βορράς": "LOCATION",
-    "Αζάκου-μα": "LOCATION",
-    "Βόρεια": "LOCATION",
-
-    # Known guilds / organizations
-    "Αυτοκρατορικοί": "ORG",
-    "Αυτοκρατορικούς": "ORG",
-    "Αυτοκρατορικών": "ORG",
-
-    "Κάπρων": "ORG",
-    "Κάπροι": "ORG",
-
-    "Μονόκερων": "ORG",
-    "Μονόκεροι": "ORG",
-
-    "Ορχιδέας": "ORG",
-    "Ορχιδέα": "ORG",
-
-    "Αρκούδας": "ORG",
-
-    "Λύκους": "ORG",
-    "Λύκοι": "ORG",
-
-    "Οχιάς": "ORG",
-    "Οχιά": "ORG",
-}
 
 PERSON_CONTEXT_PATTERNS = [
     # Strong speech evidence
@@ -109,13 +61,13 @@ PERSON_CONTEXT_PATTERNS = [
 
 
 LOCATION_CONTEXT_PATTERNS = [
-    # Motion toward location
+    # Movement
     (r"\bπρος\s+(?:το|την|τη|τον)\s+{name}\b", 4, "movement toward location"),
     (r"\bπήγε\s+(?:στο|στη|στην|στον)\s+{name}\b", 4, "movement to location"),
     (r"\bέφτασε\s+(?:στο|στη|στην|στον)\s+{name}\b", 4, "arrival at location"),
     (r"\bταξίδεψε\s+(?:στο|στη|στην|στον|προς)\s+{name}\b", 4, "travel to location"),
 
-    # Presence inside / at location
+    # Presence
     (r"\bβρισκόταν\s+(?:στο|στη|στην|στον)\s+{name}\b", 4, "presence at location"),
     (r"\bβρίσκονταν\s+(?:στο|στη|στην|στον)\s+{name}\b", 4, "presence at location"),
     (r"\bέμενε\s+(?:στο|στη|στην|στον)\s+{name}\b", 4, "residence at location"),
@@ -124,19 +76,7 @@ LOCATION_CONTEXT_PATTERNS = [
     (r"\bαπό\s+(?:το|τη|την|τον)\s+{name}\b", 3, "origin from location"),
     (r"\bέφυγε\s+από\s+(?:το|τη|την|τον)\s+{name}\b", 4, "departure from location"),
 
-    # Geographic phrasing
-    (r"\bπόλη\s+(?:του|της)\s+{name}\b", 5, "city relation"),
-    (r"\bχωριό\s+(?:του|της)\s+{name}\b", 5, "village relation"),
-    (r"\bκάστρο\s+(?:του|της)\s+{name}\b", 5, "castle relation"),
-    (r"\bβασίλειο\s+(?:του|της)\s+{name}\b", 5, "kingdom relation"),
-    (r"\bπεριοχή\s+(?:του|της)\s+{name}\b", 5, "region relation"),
-
-    # Generic location articles
-    (r"\bστο\s+{name}\b", 1, "location article"),
-    (r"\bστη\s+{name}\b", 1, "location article"),
-    (r"\bστην\s+{name}\b", 1, "location article"),
-    (r"\bστον\s+{name}\b", 1, "location article"),
-
+    # Strong structural evidence
     (r"\bκάστρο\s+{name}\b", 8, "named castle"),
     (r"\bκάστρο\s+(?:του|της)\s+{name}\b", 8, "castle relation"),
     (r"\bπόλη\s+{name}\b", 8, "named city"),
@@ -148,10 +88,28 @@ LOCATION_CONTEXT_PATTERNS = [
     (r"\bπεριοχή\s+{name}\b", 7, "named region"),
     (r"\bπεριοχή\s+(?:του|της)\s+{name}\b", 7, "region relation"),
     (r"\bεπικράτεια\s+(?:του|της)\s+{name}\b", 8, "territory relation"),
-    (r"\bβόρεια\s+(?:του|της|από\s+το|από\s+τη|από\s+την)\s+{name}\b", 5, "geographic relation"),
-    (r"\bνότια\s+(?:του|της|από\s+το|από\s+τη|από\s+την)\s+{name}\b", 5, "geographic relation"),
-    (r"\bανατολικά\s+(?:του|της|από\s+το|από\s+τη|από\s+την)\s+{name}\b", 5, "geographic relation"),
-    (r"\bδυτικά\s+(?:του|της|από\s+το|από\s+τη|από\s+την)\s+{name}\b", 5, "geographic relation"),
+
+    # Geographic relations
+    (
+        r"\bβόρεια\s+(?:του|της|από\s+το|από\s+τη|από\s+την)\s+{name}\b",
+        5,
+        "geographic relation",
+    ),
+    (
+        r"\bνότια\s+(?:του|της|από\s+το|από\s+τη|από\s+την)\s+{name}\b",
+        5,
+        "geographic relation",
+    ),
+    (
+        r"\bανατολικά\s+(?:του|της|από\s+το|από\s+τη|από\s+την)\s+{name}\b",
+        5,
+        "geographic relation",
+    ),
+    (
+        r"\bδυτικά\s+(?:του|της|από\s+το|από\s+τη|από\s+την)\s+{name}\b",
+        5,
+        "geographic relation",
+    ),
 ]
 
 

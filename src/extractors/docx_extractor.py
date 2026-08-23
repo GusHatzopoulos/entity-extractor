@@ -1,7 +1,5 @@
 from pathlib import Path
-
 from docx import Document
-
 
 def extract_text_from_docx(file_path: str | Path) -> str:
     """
@@ -31,6 +29,14 @@ def extract_text_from_docx(file_path: str | Path) -> str:
     document = Document(str(path))
 
     paragraphs = []
+
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                text = cell.text.strip()
+
+                if text:
+                    paragraphs.append(text)
 
     for paragraph in document.paragraphs:
         text = paragraph.text.strip()

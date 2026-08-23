@@ -11,6 +11,8 @@ from src.extractors.txt_extractor import extract_text_from_txt
 from src.exporters.excel_exporter import export_entities_to_xlsx
 from src.entity.final_selector import select_final_entities
 from src.exporters.appendix_exporter import export_appendix_to_xlsx
+from src.entity.name_detector import detect_name_candidates
+from src.entity.recovery_merger import build_recovery_candidates
 
 
 EXTRACTORS = {
@@ -168,6 +170,59 @@ def main() -> None:
 
     print()
     print("Done.")
+
+    print()
+    print("Detecting recovery name candidates...")
+
+    name_candidates = detect_name_candidates(
+        text,
+        min_occurrences=1,
+    )
+
+    recovered_candidates = build_recovery_candidates(
+        classified_entities,
+        name_candidates,
+    )
+
+    print()
+    print(
+        f"New recovery candidates found: "
+        f"{len(recovered_candidates):,}"
+    )
+
+    print()
+    print("New recovery candidates:")
+    print("-" * 70)
+
+    for candidate in recovered_candidates[:100]:
+        print(
+            f"{candidate.name:<30} "
+            f"count={candidate.occurrences:<5} "
+            f"score={candidate.score:<4} "
+            f"context={candidate.context_hits:<4} "
+            f"title={candidate.title_hits:<3} "
+            f"multi={candidate.multiword_hits:<3} "
+            f"{candidate.reason}"
+    )
+
+    print(
+        f"Recovery name candidates found: "
+        f"{len(name_candidates):,}"
+    )
+
+    print()
+    print("Top recovery candidates:")
+    print("-" * 70)
+
+    for candidate in name_candidates[:100]:
+        print(
+            f"{candidate.name:<30} "
+            f"count={candidate.occurrences:<5} "
+            f"score={candidate.score:<4} "
+            f"context={candidate.context_hits:<4} "
+            f"title={candidate.title_hits:<3} "
+            f"multi={candidate.multiword_hits:<3}"
+        )
 
 
 if __name__ == "__main__":
