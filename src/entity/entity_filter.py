@@ -1,5 +1,8 @@
 from src.entity.context_analyzer import get_entity_contexts
-from src.entity.lexicon import (COMMON_NON_ENTITIES, KNOWN_ENTITY_TYPES)
+from src.entity.lexicon import (
+    COMMON_NON_ENTITIES,
+    KNOWN_ENTITY_TYPES,
+)
 from src.entity.types import EntityRecord
 
 
@@ -9,6 +12,14 @@ def evaluate_entity(
 ) -> EntityRecord:
     """
     Add filtering, confidence, and context metadata to an entity.
+
+    Design goals:
+    - KNOWN entities are authoritative.
+    - Explicit common-noise entries are rejected.
+    - NER PERSON is no longer trusted automatically at HIGH confidence.
+    - Confidence reflects repetition plus contextual evidence.
+    - Low-confidence items remain in diagnostic exports unless rejected
+      explicitly; publication filtering is handled later by final_selector.
     """
 
     name = entity["entity"]
@@ -19,25 +30,47 @@ def evaluate_entity(
     keep = True
     confidence = "REVIEW"
 
+    # -----------------------------------------------------
+    # Authoritative known entities
+    # -----------------------------------------------------
+
     if name in KNOWN_ENTITY_TYPES:
         keep = True
         confidence = "HIGH"
+
+    # -----------------------------------------------------
+    # Explicit noise
+    # -----------------------------------------------------
 
     elif name in COMMON_NON_ENTITIES:
         keep = False
         confidence = "REJECT"
 
-    elif source == "NER" and entity_type == "PERSON":
-        confidence = "HIGH"
+    # -----------------------------------------------------
+    # Initial confidence before context reclassification
+    # -----------------------------------------------------
 
-    elif source == "NER" and occurrences >= 5:
-        confidence = "MEDIUM"
+    elif source == "NER":
+        # Repetition gives useful evidence, but a single spaCy PERSON
+        # prediction must not automatically become publication-grade.
+        if occurrences >= 5:
+            confidence = "MEDIUM"
+        elif occurrences >= 2:
+            confidence = "REVIEW"
+        else:
+            confidence = "LOW"
 
-    elif source == "HEURISTIC" and occurrences >= 5:
-        confidence = "REVIEW"
+    elif source == "HEURISTIC":
+        if occurrences >= 5:
+            confidence = "REVIEW"
+        elif occurrences >= 2:
+            confidence = "LOW"
+        else:
+            confidence = "LOW"
 
-    elif source == "HEURISTIC" and occurrences < 2:
-        confidence = "LOW"
+    # -----------------------------------------------------
+    # Context collection
+    # -----------------------------------------------------
 
     contexts = get_entity_contexts(
         text,
@@ -58,7 +91,10 @@ def filter_entities(
     text: str,
 ) -> list[EntityRecord]:
     """
-    Evaluate entities and remove rejected false positives.
+    Evaluate entities and remove only explicit rejected noise.
+
+    This stage intentionally remains recall-oriented.
+    The final publication precision gate lives in final_selector.py.
     """
 
     evaluated: list[EntityRecord] = [

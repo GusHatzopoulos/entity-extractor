@@ -1,30 +1,55 @@
 import argparse
-
 from pathlib import Path
-from src.entity.detector import detect_combined_entities
+from time import perf_counter
+
+from src.entity.canonicalizer import canonicalize_entities
 from src.entity.context_classifier import reclassify_entities
+from src.entity.detector import detect_combined_entities
 from src.entity.entity_filter import filter_entities
-from src.exporters.csv_exporter import export_entities_to_csv
-from src.extractors.docx_extractor import extract_text_from_docx
-from src.extractors.txt_extractor import extract_text_from_txt
-from src.exporters.excel_exporter import export_entities_to_xlsx
 from src.entity.final_selector import select_final_entities
-from src.exporters.appendix_exporter import export_appendix_to_xlsx
 from src.entity.name_detector import detect_name_candidates
 from src.entity.recovery_merger import build_recovery_candidates
-from src.text_cleaner import clean_extracted_text
-from src.entity.canonicalizer import canonicalize_entities
 
+from src.entity.count_validator import validate_canonical_counts
+
+from src.exporters.appendix_exporter import export_appendix_to_xlsx
+from src.exporters.csv_exporter import export_entities_to_csv
+from src.exporters.excel_exporter import export_entities_to_xlsx
+
+from src.extractors.docx_extractor import extract_text_from_docx
+from src.extractors.pdf_extractor import extract_text_from_pdf
+from src.extractors.txt_extractor import extract_text_from_txt
+
+from src.text_cleaner import clean_extracted_text
+
+
+# =========================================================
+# Supported input formats
+# =========================================================
 
 EXTRACTORS = {
     ".docx": extract_text_from_docx,
+    ".pdf": extract_text_from_pdf,
     ".txt": extract_text_from_txt,
 }
-    
+
+
+# =========================================================
+# Main
+# =========================================================
+
 def main() -> None:
+    total_start = perf_counter()
+
+    # -----------------------------------------------------
+    # Arguments
+    # -----------------------------------------------------
 
     parser = argparse.ArgumentParser(
-        description="Extract text and named entities from a document."
+        description=(
+            "Extract text and named entities "
+            "from a supported document."
+        )
     )
 
     parser.add_argument(
@@ -35,10 +60,32 @@ def main() -> None:
         help="Path to a supported input file.",
     )
 
+    parser.add_argument(
+        "--validate-counts",
+        action="store_true",
+        help=(
+            "Validate canonical occurrence counts "
+            "against stored text spans."
+        ),
+    )
+
+    parser.add_argument(
+        "--validate-name",
+        action="append",
+        default=[],
+        help=(
+            "Canonical entity name to inspect during "
+            "count validation. Can be supplied more "
+            "than once."
+        ),
+    )
+
     args = parser.parse_args()
     input_file = args.input_file
 
-    extractor = EXTRACTORS.get(input_file.suffix.lower())
+    extractor = EXTRACTORS.get(
+        input_file.suffix.lower()
+    )
 
     if extractor is None:
         parser.error(
@@ -46,28 +93,63 @@ def main() -> None:
             f"{input_file.suffix or '(none)'}"
         )
 
+    # -----------------------------------------------------
+    # Input
+    # -----------------------------------------------------
+
     print()
     print(f"Input file: {input_file}")
     print()
 
+    # =====================================================
+    # 1. Text extraction / cleanup
+    # =====================================================
+
+    extraction_start = perf_counter()
+
     print("Reading document...")
 
     text = extractor(input_file)
-    text = clean_extracted_text(text)
+
+    text = clean_extracted_text(
+        text
+    )
+
+    extraction_time = (
+        perf_counter()
+        - extraction_start
+    )
 
     print(
         f"Text extraction completed: "
         f"{len(text):,} characters"
     )
-    print()
 
+    # =====================================================
+    # 2. Entity detection / NLP
+    # =====================================================
+
+    print()
     print("Detecting entities...")
     print()
+
+    detection_start = perf_counter()
 
     entities = detect_combined_entities(
         text,
         min_occurrences=1,
     )
+
+    detection_time = (
+        perf_counter()
+        - detection_start
+    )
+
+    # =====================================================
+    # 3. Filtering / classification / canonicalization
+    # =====================================================
+
+    classification_start = perf_counter()
 
     filtered_entities = filter_entities(
         entities,
@@ -86,6 +168,22 @@ def main() -> None:
         canonical_entities
     )
 
+    if args.validate_counts:
+        validate_canonical_counts(
+            text,
+            final_entities,
+            names=(
+                args.validate_name
+                if args.validate_name
+                else None
+            ),
+        )
+
+    classification_time = (
+        perf_counter()
+        - classification_start
+    )
+
     print()
     print(
         f"Entity detection completed: "
@@ -98,29 +196,41 @@ def main() -> None:
     )
 
     print(
-    f"Final persons/locations: "
-    f"{len(final_entities):,}"
-)
+        f"Final persons/locations: "
+        f"{len(final_entities):,}"
+    )
 
+    # =====================================================
+    # 4. Output paths
+    # =====================================================
+
+    output_directory = Path("output")
 
     csv_output_file = (
-    Path("output")
-    / f"{input_file.stem}_entities.csv"
+        output_directory
+        / f"{input_file.stem}_entities.csv"
     )
 
     xlsx_output_file = (
-        Path("output")
+        output_directory
         / f"{input_file.stem}_entities.xlsx"
     )
 
     appendix_output_path = (
-        Path("output")
+        output_directory
         / f"{input_file.stem}_appendix.xlsx"
     )
+
+    # =====================================================
+    # 5. Export
+    # =====================================================
+
+    export_start = perf_counter()
 
     print()
     print("Exporting results...")
 
+    # Diagnostic/raw classified exports
     export_entities_to_csv(
         classified_entities,
         csv_output_file,
@@ -131,9 +241,15 @@ def main() -> None:
         xlsx_output_file,
     )
 
+    # Canonicalized appendix
     export_appendix_to_xlsx(
-        canonical_entities,
+        final_entities,
         appendix_output_path,
+    )
+
+    export_time = (
+        perf_counter()
+        - export_start
     )
 
     print(
@@ -141,8 +257,19 @@ def main() -> None:
         f"{appendix_output_path}"
     )
 
-    print(f"CSV exported to: {csv_output_file}")
-    print(f"XLSX exported to: {xlsx_output_file}")
+    print(
+        f"CSV exported to: "
+        f"{csv_output_file}"
+    )
+
+    print(
+        f"XLSX exported to: "
+        f"{xlsx_output_file}"
+    )
+
+    # =====================================================
+    # 6. Diagnostic preview
+    # =====================================================
 
     print()
     print("Preview:")
@@ -153,7 +280,7 @@ def main() -> None:
     print("Combined entities:")
     print("-" * 70)
 
-    if entities:
+    if classified_entities:
         print(
             f"{'ENTITY':<30}"
             f"{'TYPE':<15}"
@@ -170,14 +297,20 @@ def main() -> None:
                 f"{str(item['source']):<12}"
                 f"{int(item['occurrences']):>8}"
             )
+
     else:
         print("No entities found.")
 
-    print()
-    print("Done.")
+    # =====================================================
+    # 7. Recovery detection
+    # =====================================================
 
     print()
-    print("Detecting recovery name candidates...")
+    print(
+        "Detecting recovery name candidates..."
+    )
+
+    recovery_start = perf_counter()
 
     existing_entity_names = {
         entity["entity"]
@@ -190,10 +323,21 @@ def main() -> None:
         excluded_names=existing_entity_names,
     )
 
-    recovered_candidates = build_recovery_candidates(
-        classified_entities,
-        name_candidates,
+    recovered_candidates = (
+        build_recovery_candidates(
+            classified_entities,
+            name_candidates,
+        )
     )
+
+    recovery_time = (
+        perf_counter()
+        - recovery_start
+    )
+
+    # -----------------------------------------------------
+    # New recovery candidates
+    # -----------------------------------------------------
 
     print()
     print(
@@ -214,8 +358,13 @@ def main() -> None:
             f"title={candidate.title_hits:<3} "
             f"multi={candidate.multiword_hits:<3} "
             f"{candidate.reason}"
-    )
+        )
 
+    # -----------------------------------------------------
+    # All recovery candidates
+    # -----------------------------------------------------
+
+    print()
     print(
         f"Recovery name candidates found: "
         f"{len(name_candidates):,}"
@@ -235,6 +384,58 @@ def main() -> None:
             f"multi={candidate.multiword_hits:<3}"
         )
 
+    # =====================================================
+    # 8. Performance report
+    # =====================================================
+
+    total_time = (
+        perf_counter()
+        - total_start
+    )
+
+    print()
+    print("Performance:")
+    print("-" * 70)
+
+    print(
+        f"Text extraction:       "
+        f"{extraction_time:8.2f} s"
+    )
+
+    print(
+        f"Detection / NLP:       "
+        f"{detection_time:8.2f} s"
+    )
+
+    print(
+        f"Filter / classify:     "
+        f"{classification_time:8.2f} s"
+    )
+
+    print(
+        f"Exports:               "
+        f"{export_time:8.2f} s"
+    )
+
+    print(
+        f"Recovery detection:    "
+        f"{recovery_time:8.2f} s"
+    )
+
+    print("-" * 70)
+
+    print(
+        f"Total runtime:         "
+        f"{total_time:8.2f} s"
+    )
+
+    print()
+    print("Done.")
+
+
+# =========================================================
+# Entry point
+# =========================================================
 
 if __name__ == "__main__":
     main()

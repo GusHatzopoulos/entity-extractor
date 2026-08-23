@@ -10,6 +10,7 @@ from src.entity.lexicon import (
     TITLE_WORDS,
 )
 
+from src.entity.normalizer import normalize_entity_name
 
 # =========================================================
 # Prefixes / descriptive aliases
@@ -87,21 +88,16 @@ class CandidateStats:
 def normalize_name(
     name: str,
 ) -> str:
-    name = unicodedata.normalize(
-        "NFC",
-        name,
-    )
+    """
+    Use the same entity-name normalization pipeline as
+    the main detector.
 
-    name = (
-        name
-        .replace("\u200b", "")
-        .replace("\ufeff", "")
-        .replace("\u00ad", "")
-    )
+    This keeps recovery detection consistent with normal
+    entity detection and prevents title/article variants
+    from being rediscovered as separate candidates.
+    """
 
-    return " ".join(
-        name.strip().split()
-    )
+    return normalize_entity_name(name)
 
 
 def clean_input_text(
@@ -147,15 +143,16 @@ def is_allowed_candidate(
             and name not in ROLE_WORDS
         )
 
-    # Reject:
-    # Στην Έιλιν
-    # Διοικητή Όνοξ
-    # Βασιλιά Ρέιμοντ Ρανόν
-    if parts[0] in PREFIX_WORDS:
-        return False
-
-    if all(
-        part in COMMON_NON_ENTITIES
+    # Recovery multiword candidates must not contain generic
+    # words, titles or roles unless the whole candidate is an
+    # explicitly known entity. This blocks artefacts such as:
+    #
+    #     Κωνσταντίνος Χατζόπουλος Με
+    #     Ελλάδα Πρώτη
+    #
+    # while KNOWN_ENTITY_TYPES still has absolute priority.
+    if any(
+        part in PREFIX_WORDS
         for part in parts
     ):
         return False
@@ -338,6 +335,67 @@ def _local_evidence(
 # Single-pass candidate indexing
 # =========================================================
 
+
+def _is_multiword_fragment_of_reference_entity(
+    name: str,
+    reference_names: set[str],
+) -> bool:
+    """
+    Reject only multiword candidates that are contiguous
+    fragments of a longer known/already-detected entity.
+
+    Single-word candidates are never rejected here.
+
+    Examples:
+
+        Λίαμ Ράλιους
+        -> fragment of Λίαμ Ράλιους Ντέρμοντ
+        -> reject
+
+        Ράλιους Ντέρμοντ
+        -> fragment of Λίαμ Ράλιους Ντέρμοντ
+        -> reject
+
+        Κέλαν
+        -> single word
+        -> keep
+    """
+
+    if not name:
+        return False
+
+    parts = name.split()
+
+    if len(parts) < 2:
+        return False
+
+    # If the candidate itself is an explicit known entity,
+    # it must survive.
+    if name in KNOWN_ENTITY_TYPES:
+        return False
+
+    for reference_name in reference_names:
+        reference_parts = reference_name.split()
+
+        if len(reference_parts) <= len(parts):
+            continue
+
+        window_size = len(parts)
+
+        for start in range(
+            len(reference_parts) - window_size + 1
+        ):
+            if (
+                reference_parts[
+                    start:start + window_size
+                ]
+                == parts
+            ):
+                return True
+
+    return False
+
+
 def _index_candidates(
     text: str,
     excluded_names: set[str],
@@ -365,6 +423,11 @@ def _index_candidates(
 
     token_count = len(tokens)
 
+    reference_names = (
+        excluded_names
+        | set(KNOWN_ENTITY_TYPES.keys())
+    )
+
     for index, token_match in enumerate(tokens):
         # -------------------------------------------------
         # Single-word candidate
@@ -373,6 +436,9 @@ def _index_candidates(
         raw_name = normalize_name(
             token_match.group(1)
         )
+
+        if not raw_name:
+            continue
 
         if (
             raw_name not in excluded_names
@@ -428,6 +494,8 @@ def _index_candidates(
                 if (
                     not separator
                     or not separator.isspace()
+                    or "\n" in separator
+                    or "\r" in separator
                 ):
                     valid_sequence = False
                     break
@@ -444,10 +512,32 @@ def _index_candidates(
                 raw_multi_name
             )
 
+            if not raw_multi_name:
+                continue
+
+            # Normalization may turn:
+            #
+            #     Διάκονε Γιόρεν
+            #     -> Γιόρεν
+            #
+            # If the normalized entity is already known/detected,
+            # recovery must not rediscover it.
+            if (
+                raw_multi_name in excluded_names
+                or raw_multi_name in KNOWN_ENTITY_TYPES
+            ):
+                continue
+
             # Epithets are descriptive variants of an
             # already existing entity. Do not create a
             # separate recovery candidate.
             if raw_multi_name in EPITHET_ALIASES:
+                continue
+
+            if _is_multiword_fragment_of_reference_entity(
+                raw_multi_name,
+                reference_names,
+            ):
                 continue
 
             if raw_multi_name in excluded_names:
@@ -544,7 +634,20 @@ def detect_name_candidates(
         ):
             continue
 
+        # Unknown recovery candidates must have actual evidence.
+        #
+        # Known entities have already been excluded from recovery,
+        # so a remaining candidate should not survive merely
+        # because it starts with a capital Greek letter.
+        if (
+            candidate_stats.context_hits == 0
+            and candidate_stats.title_hits == 0
+            and candidate_stats.multiword_hits == 0
+        ):
+            continue
+
         candidates.append(
+
             NameCandidate(
                 name=name,
                 occurrences=(

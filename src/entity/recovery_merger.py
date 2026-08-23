@@ -1,5 +1,11 @@
 from dataclasses import dataclass
 
+from src.entity.lexicon import (
+    COMMON_NON_ENTITIES,
+    KNOWN_ENTITY_TYPES,
+    ROLE_WORDS,
+    TITLE_WORDS,
+)
 from src.entity.name_detector import NameCandidate
 from src.entity.types import EntityRecord
 
@@ -15,6 +21,59 @@ class RecoveredCandidate:
     reason: str
 
 
+def _contains_generic_component(name: str) -> bool:
+    """
+    Reject recovery-only multiword artefacts containing generic
+    words, titles, or roles. Explicit known entities are exempt.
+    """
+
+    if name in KNOWN_ENTITY_TYPES:
+        return False
+
+    parts = name.split()
+
+    return any(
+        part in COMMON_NON_ENTITIES
+        or part in TITLE_WORDS
+        or part in ROLE_WORDS
+        for part in parts
+    )
+
+
+def _is_component_of_known_multiword_entity(name: str) -> bool:
+    """
+    Reject a recovery candidate that is only one component of an
+    already known multiword entity.
+
+    Examples:
+        Γκρίζοι -> Γκρίζοι Λόφοι
+        Απόκρυφου -> Απόκρυφου Μουσείου
+        Χρυσής -> Χρυσής Εποχής
+
+    This rule is intentionally used only in recovery promotion.
+    The main detector may still keep legitimate standalone names.
+    """
+
+    if not name or name in KNOWN_ENTITY_TYPES:
+        return False
+
+    candidate_parts = name.split()
+
+    for known_name in KNOWN_ENTITY_TYPES:
+        known_parts = known_name.split()
+
+        if len(known_parts) <= len(candidate_parts):
+            continue
+
+        window_size = len(candidate_parts)
+
+        for start in range(len(known_parts) - window_size + 1):
+            if known_parts[start:start + window_size] == candidate_parts:
+                return True
+
+    return False
+
+
 def build_recovery_candidates(
     existing_entities: list[EntityRecord],
     name_candidates: list[NameCandidate],
@@ -22,11 +81,17 @@ def build_recovery_candidates(
     min_context_hits: int = 3,
 ) -> list[RecoveredCandidate]:
     """
-    Return only NEW recovery candidates that are not already present
-    in the main classified entity list.
+    Return only genuinely useful NEW recovery candidates.
 
-    The goal is high recall without automatically promoting
-    everything to PERSON.
+    Recovery is intentionally stricter than the main detector.
+    A candidate is promoted only when it has strong evidence:
+
+    - title evidence, or
+    - repeated multiword evidence, or
+    - multiword evidence plus person-context evidence, or
+    - strong repeated person-context evidence.
+
+    Weak one-off capitalized phrases stay diagnostic-only.
     """
 
     existing_names = {
@@ -40,10 +105,28 @@ def build_recovery_candidates(
         if candidate.name in existing_names:
             continue
 
+        if candidate.name in KNOWN_ENTITY_TYPES:
+            continue
+
+        if candidate.name in COMMON_NON_ENTITIES:
+            continue
+
+        if _contains_generic_component(candidate.name):
+            continue
+
+        if _is_component_of_known_multiword_entity(candidate.name):
+            continue
+
         strong_title = candidate.title_hits >= 1
 
-        strong_multiword = (
+        repeated_multiword = (
+            candidate.multiword_hits >= 2
+            and candidate.occurrences >= 2
+        )
+
+        contextual_multiword = (
             candidate.multiword_hits >= 1
+            and candidate.context_hits >= 1
             and candidate.occurrences >= 1
         )
 
@@ -55,7 +138,8 @@ def build_recovery_candidates(
 
         if not (
             strong_title
-            or strong_multiword
+            or repeated_multiword
+            or contextual_multiword
             or strong_context
         ):
             continue
@@ -67,9 +151,15 @@ def build_recovery_candidates(
                 f"title evidence={candidate.title_hits}"
             )
 
-        if strong_multiword:
+        if repeated_multiword:
             reasons.append(
-                f"multiword evidence={candidate.multiword_hits}"
+                f"repeated multiword evidence={candidate.multiword_hits}"
+            )
+
+        elif contextual_multiword:
+            reasons.append(
+                f"multiword+context evidence={candidate.multiword_hits}/"
+                f"{candidate.context_hits}"
             )
 
         if strong_context:
