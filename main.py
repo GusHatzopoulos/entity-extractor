@@ -14,13 +14,13 @@ from src.exporters.appendix_exporter import export_appendix_to_xlsx
 from src.entity.name_detector import detect_name_candidates
 from src.entity.recovery_merger import build_recovery_candidates
 from src.text_cleaner import clean_extracted_text
+from src.entity.canonicalizer import canonicalize_entities
 
 
 EXTRACTORS = {
     ".docx": extract_text_from_docx,
     ".txt": extract_text_from_txt,
 }
-
 
 def main() -> None:
 
@@ -79,9 +79,13 @@ def main() -> None:
         filtered_entities
     )
 
+    canonical_entities = canonicalize_entities(
+        classified_entities
+    )
+
     final_entities = select_final_entities(
-    classified_entities
-)
+        canonical_entities
+    )
 
     print()
     print(
@@ -129,7 +133,7 @@ def main() -> None:
     )
 
     export_appendix_to_xlsx(
-        classified_entities,
+        canonical_entities,
         appendix_output_path,
     )
 

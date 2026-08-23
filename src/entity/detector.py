@@ -6,6 +6,7 @@ import spacy
 from src.entity.lexicon import (COMMON_NON_ENTITIES, KNOWN_ENTITY_TYPES, ROLE_WORDS, TITLE_WORDS)
 from src.entity.normalizer import normalize_entity_name
 from src.entity.types import EntityRecord
+from src.entity.known_entity import detect_known_entities
 
 nlp = spacy.load("el_core_news_sm")
 
@@ -255,6 +256,8 @@ def detect_combined_entities(
         detect_spacy_entities_and_candidates(text)
     )
 
+    known_entities = detect_known_entities(text)
+
     candidate_entities = [
         (name, count)
         for name, count in all_candidates
@@ -262,6 +265,9 @@ def detect_combined_entities(
     ]
 
     combined: dict[str, EntityRecord] = {}
+
+    for entity in known_entities:
+        combined[entity["entity"]] = entity
 
     # Aggregate NER results.
     for entity_text, entity_type in ner_entities:
@@ -273,6 +279,9 @@ def detect_combined_entities(
             continue
 
         if entity_text in combined:
+            if combined[entity_text].get("source") == "KNOWN":
+                continue
+
             combined[entity_text][
                 "occurrences"
             ] += 1
@@ -295,6 +304,9 @@ def detect_combined_entities(
             continue
 
         if entity_text in combined:
+            if combined[entity_text].get("source") == "KNOWN":
+                continue
+
             combined[entity_text][
                 "occurrences"
             ] = max(
